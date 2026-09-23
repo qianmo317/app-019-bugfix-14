@@ -4,7 +4,7 @@ import type { Joint, JointKind } from '../types'
 import type { DovetailResult } from '../lib/dovetail'
 import type { TenonResult } from '../lib/tenon'
 import type { LapResult, DowelResult, PanelResult } from '../lib/joints'
-import { fmtDrawing } from '../lib/format'
+import { fmtClosure, fmtDrawing } from '../lib/format'
 
 export type ViewId = 'front' | 'top' | 'side'
 
@@ -105,7 +105,7 @@ function dovetailViews(kind: JointKind, p: Joint['params'], dt: DovetailResult):
   hdim(front, 0, W, t + 12, `板宽 ${fmtDrawing(W)}`)
   vdim(front, 0, t, -12, `厚 ${fmtDrawing(t)}`)
   if (dt.teeth[0]) {
-    hdim(front, dt.teeth[0].faceX, dt.teeth[0].faceX + dt.teeth[0].topW, -10, `齿顶 ${fmtDrawing(dt.teeth[0].topW)}`)
+    hdim(front, dt.teeth[0].faceX, dt.teeth[0].faceXEnd, -10, `齿顶 ${fmtClosure(dt.teeth[0].topW)}`)
   }
   const slopeMid = dt.teeth[0]
   if (slopeMid) {
@@ -132,9 +132,10 @@ function dovetailViews(kind: JointKind, p: Joint['params'], dt: DovetailResult):
     top.marks.push({ x: th.faceX + th.topW / 2, y: LJ - 6, text: String(th.index) })
   }
   hdim(top, 0, W, LJ + 12, `板宽 ${fmtDrawing(W)}`)
-  hdim(top, 0, dt.margin, -10, `边距 ${fmtDrawing(dt.margin)}`)
+  hdim(top, 0, dt.leftMargin, -10, `左边距 ${fmtClosure(dt.leftMargin)}`)
+  hdim(top, W - dt.rightMargin, W, -10, `右边距 ${fmtClosure(dt.rightMargin)}`)
   if (dt.teeth.length >= 2) {
-    hdim(top, dt.teeth[0].faceX, dt.teeth[1].faceX, -20, `齿距 ${fmtDrawing(dt.pitch)}`)
+    hdim(top, dt.teeth[0].faceX, dt.teeth[1].faceX, -20, `齿距 ${fmtClosure(dt.teeth[0].pitchW)}`)
   }
   top.texts.push({ x: 0, y: LJ + 24, text: '↑ 拼接端；按虚线（锯切线）下锯', anchor: 'start', cls: 'note' })
 

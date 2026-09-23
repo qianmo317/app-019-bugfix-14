@@ -20,7 +20,7 @@
 ## 4. 核心功能（MVP）
 1. **六种榫卯计算**（`src/types.ts:65` 的 `JOINT_KINDS`，编辑器可随时切换并即时重算）：
    燕尾榫（穿透式）、半隐燕尾榫、直榫（榫头榫眼）、圆木榫/饼干榫（定位孔）、企口/搭接（Lap）、拼板（木钉/槽）。
-2. **燕尾齿宽分配**：0.1mm 网格 + 累积取整差分，Σ齿顶宽 + Σ齿根宽 与板宽严格闭合（误差 ≤ 0.1mm）；边距 = 半齿根宽（左右对称）；齿数可自动建议或手动指定（0 = 自动，上限 12）。
+2. **燕尾齿宽分配**：0.05mm 闭合格子整数分配（必要时回退 0.025mm），逐齿「齿顶宽 + 齿根宽 = 齿距」，Σ齿顶宽 + Σ齿根宽 与板宽严格闭合；左右边距相等且明示，均为端齿齿根宽的一半；齿数可自动建议或手动指定（0 = 自动，上限 12）。
 3. **三视图出图**：正视图 / 俯视图 / 侧视图由同一套几何函数生成，共用 `ViewModel` 数据模型，宽度一致；自动尺寸标注 + 齿序编号圆标（`src/geometry/views.ts`）。
 4. **锯路补偿**：图纸同时标注理论线与锯切线（锯切线 = 理论线向废料侧偏移 kerf/2），切割步骤按「先锯废料侧」排序。
 5. **配合余量表**：硬木/软木 × 紧/标准/松 六格经验值，可编辑并持久化，数据损坏时回退默认表。
@@ -66,15 +66,17 @@ interface ViewModel { id: 'front'|'top'|'side'; title: string; contentW: number;
 持久化键（`localStorage`）：`wjb.plans.v1`（方案列表）、`wjb.fittable.v1`（配合余量表）。
 
 ## 8. 关键算法（或关键实现点）
-- **累积取整差分（燕尾齿宽分配，`src/lib/dovetail.ts:81-104`）**：先整体换算到 0.1mm 网格，再逐齿取相邻差分，保证总和严格闭合。
+- **整数闭合格子（燕尾齿宽分配，`src/lib/dovetail.ts`）**：先换算到 0.05mm 格子（偶数齿遇到奇数总格数时回退 0.025mm），再让齿顶/齿根差和齿根合计都是整数，保证坐标逐段相加闭合。
   ```text
-  totalUnits = round(板宽 / 0.1);  per = totalUnits / 齿数
-  pair[i]    = round(per × (i+1)) − round(per × i)      # Σpair === totalUnits
-  d          = round(2 × 斜移量 / 0.1);  斜移量 = 齿深 / 角度比 r
-  topUnits[i] = round((pair[i] + d) / 2);  rootUnits[i] = pair[i] − topUnits[i]
-  边距 = 末齿齿根宽 / 2；齿间槽宽 = 该齿齿根宽
+  G          = 0.05（必要时 0.025）
+  T          = round(板宽 / G)
+  d          = 最接近 round(2×斜移量/G) 且满足奇偶约束的整数格；斜移量 = 齿深 / r
+  q          = (T − n×d) / 2
+  root[i]    = 整数格分配，两端齿根等宽
+  top[i]     = root[i] + d；pitch[i] = top[i] + root[i]
+  左边距     = root[0]/2；右边距 = root[n-1]/2
   ```
-  逐齿偏差 ≤ 1 格（0.1mm），闭合误差 `closureError` 每轮实测（编辑器页脚显示到小数点后 3 位）。
+  物理顺序为「左边距 + 齿1顶 + 齿1根槽 + … + 齿n顶 + 右边距」，末齿齿根由左右两个半齿边距合计承担；因此 `Σ(top+root) === 板宽`，`closureError` 实测为 0（页面显示 3 位小数）。
 - **齿数建议（`dovetail.ts:56`）**：目标齿距约 28mm，`clamp(round(板宽/28), 2, 12)`，然后在不超过 2 齿的前提下递减，直到齿根宽 ≥ 最小安全值。
 - **不静默放行**：齿根 < `MIN_ROOT`（软木 6mm / 硬木 4mm，`dovetail.ts:12`）、齿顶 < 2×kerf（锯片切不出来）、板宽 ≥ 150 而齿数 < 3、齿距 < 15mm、齿数为负值或超出 2~12，都写入 `warnings` 并在编辑器 `role="alert"` 区域展示。
 - **直榫经验公式（`src/lib/tenon.ts:42-53`）**：
@@ -90,7 +92,7 @@ interface ViewModel { id: 'front'|'top'|'side'; title: string; contentW: number;
 - **三视图一致性（`src/geometry/views.ts:302`）**：`buildViews` 按类型分派到 5 个几何函数，每类返回 3 个 `ViewModel`；正视图 `contentW` 恒等于俯视图 `contentW`（单测逐类型断言）；大面截取长度常量 `LJ = 36mm`。
 - **锯路补偿的实现范围**：燕尾正/俯视图每齿两侧各画一条 `saw` 线（数量 = 2 × 齿数，单测断言），搭接/圆榫/拼板视图不画锯切线（见 §11）。
 - **切割清单（`src/lib/cutlist.ts`）**：`buildCutList` 输出 `{ boardA, boardB, cautions }`，A 件按类型给 3~7 步、B 件给 1~5 步，步骤号有序；注意事项恒定包含锯路规则与「先在废料上试锯」。
-- **数值格式化（`src/lib/format.ts`）**：内部统一 0.1mm（`round01`），图纸与列表标注用 0.5mm 步进（`round05` / `fmtDrawing`，整数不带 `.0`），计算表格用 `fmt01` 保留一位小数。
+- **数值格式化（`src/lib/format.ts`）**：图纸常规标注用 0.5mm 步进（`round05` / `fmtDrawing`，整数不带 `.0`）；燕尾齿宽核对表用 `fmtClosure` 显示闭合格子实际值（最多 3 位小数），避免逐行四舍五入后账面加不回板宽。
 - **重算性能**：参数改动即 `useMemo` 重算「计算 + 出图」（`EditorPage.tsx:22-29`）；200 组随机配置的单次耗时本机实测最大 **0.57ms**（`vitest run` 控制台输出）。
 
 ## 9. 交互与视觉要点
@@ -101,12 +103,12 @@ interface ViewModel { id: 'front'|'top'|'side'; title: string; contentW: number;
 - 打印：`@media print` 隐藏 `.no-print`（顶栏与打印工具栏），打印页宽度限制 210mm（A4），每个打印区块 `break-inside: avoid`；页面上直接写清「关闭适应页面/缩放，100% 打印」。
 
 ## 10. 验收标准
-- **齿宽分配**：200 组随机参数（可复现种子 `mulberry32(20260916)`，板宽 50~600、齿数 2~12、角度比 6/7/8、kerf 0.8~2.2）闭合误差 ≤ 0.1mm；低于最小安全值等违规情形必须出警告，正常情形警告必须为空。
+- **齿宽分配**：200 组随机参数（可复现种子 `mulberry32(20260916)`，板宽 50~600、齿数 2~12、角度比 6/7/8、kerf 0.8~2.2）闭合误差为 0（浮点容差 1e-9）；逐齿断言齿顶+齿根=齿距，左右边距相等且等于端齿齿根一半；低于最小安全值等违规情形必须出警告，正常情形警告必须为空。
 - **直榫**：10 组手工核算用例，20mm 硬木标准配合 → 榫厚 6.7mm；紧配 +0.2、松配 −0.3；穿透榫眼深 = 孔板厚 + 1。
 - **三视图**：六种类型逐一断言 `front.contentW === top.contentW`，每类 3 个视图，几何坐标不越界；燕尾锯切线数 = 2 × 齿数，齿序编号覆盖每个齿。
 - **导出/导入**：`importJSON(exportJSON(plan))` 与原文 `JSON.stringify` 全等；缺字段或坏 JSON 必须抛错；E2E 覆盖「导出 → 删除 → 导入 → viewBox 与参数一致」。
 - **性能**：参数改动到图纸重算 < 100ms（README 记录 0.51ms，本机重跑 0.57ms）。
-- **测试总量**：vitest 5 个文件 53 例 = 单元 43（dovetail 8 / tenon 13 / views 14 / store 8）+ 组件 10；Playwright E2E 7 例。
+- **测试总量**：vitest 5 个文件 54 例 = 单元 44（dovetail 9 / tenon 13 / views 14 / store 8）+ 组件 10；Playwright E2E 7 例。
 - **打印**：页面含 100mm 校验尺，实测 0→100 段误差 ≤ 1mm；打印调用与模板页可被 E2E 断言。
 - **容器**：`docker compose up -d --build` 后 `curl http://localhost:8099/healthz` 返回 `ok`，容器 healthy（详见 §12）。
 

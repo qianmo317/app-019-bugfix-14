@@ -69,7 +69,12 @@ describe('编辑器：参数改动即时重算 + 脏状态提示 + 齿宽表', (
     render(<EditorPage id={id} />)
     // 初始无脏状态
     expect(screen.queryByTestId('dirty-bar')).toBeNull()
-    expect(screen.getByTestId('tooth-table')).toBeInTheDocument()
+    const table = screen.getByTestId('tooth-table')
+    expect(table).toBeInTheDocument()
+    expect(screen.getByTestId('closure-check')).toHaveTextContent('左边距 6mm ＝ 右边距 6mm')
+    expect(screen.getByTestId('sum-pitch')).toHaveTextContent('200')
+    const ledgerRows = screen.getByTestId('closure-ledger').querySelectorAll('tbody tr')
+    expect(ledgerRows[ledgerRows.length - 1]).toHaveTextContent('200')
     // 齿数过多 → 警告
     const teeth = screen.getByTestId('teeth')
     await user.clear(teeth)

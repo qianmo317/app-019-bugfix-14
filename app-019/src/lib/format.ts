@@ -19,6 +19,11 @@ export function fmt01(x: number): string {
   return round01(x).toFixed(1)
 }
 
+/** 齿宽核对表文本：保留到闭合格子（0.025/0.05mm），去掉无意义的末尾零 */
+export function fmtClosure(x: number): string {
+  return x.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')
+}
+
 /** 坐标取整到 0.1 网格，消除浮点误差 */
 export function snap01(x: number): number {
   return Math.round(x * 10) / 10

@@ -5,7 +5,7 @@ import { KIND_LABEL } from '../types'
 import { computeJoint } from '../lib/calc'
 import { buildViews } from '../geometry/views'
 import { buildCutList } from '../lib/cutlist'
-import { fmt01 } from '../lib/format'
+import { fmtClosure } from '../lib/format'
 import { getPlan, upsertPlan, downloadJSON, deletePlan } from '../store/plans'
 import { navigate } from '../router'
 import { ViewSvg, CheckRuler } from '../components/ViewSvg'
@@ -113,7 +113,7 @@ export function EditorPage({ id }: { id: string }) {
           </div>
           <p className="note" data-testid="recalc-ms">重算耗时 {recalcMs.current.toFixed(1)}ms（要求 &lt;100ms）</p>
           {computed && joint.kind.startsWith('dovetail') && computed.result.dovetail && (
-            <ToothTable dt={computed.result.dovetail} />
+            <ToothTable dt={computed.result.dovetail} width={joint.params.boardA.width} />
           )}
         </main>
 
@@ -136,7 +136,35 @@ export function EditorPage({ id }: { id: string }) {
   )
 }
 
-function ToothTable({ dt }: { dt: NonNullable<ReturnType<typeof computeJoint>['dovetail']> }) {
+function ToothTable({
+  dt,
+  width,
+}: {
+  dt: NonNullable<ReturnType<typeof computeJoint>['dovetail']>
+  width: number
+}) {
+  const sumTop = dt.teeth.reduce((s, t) => s + t.topW, 0)
+  const sumRoot = dt.teeth.reduce((s, t) => s + t.rootW, 0)
+  const sumPitch = dt.teeth.reduce((s, t) => s + t.pitchW, 0)
+  const slotRoot = sumRoot - dt.teeth[dt.teeth.length - 1].rootW // 前 n−1 个齿根槽；末齿齿根拆成左右两个半齿边距
+  const ledger: { name: string; w: number }[] = [
+    { name: '左边距（半齿）', w: dt.leftMargin },
+    ...dt.teeth.flatMap((t) => {
+      const rows = [{ name: `齿 ${t.index} 齿顶`, w: t.topW }]
+      if (t.index < dt.teeth.length) rows.push({ name: `齿 ${t.index} 齿根槽`, w: t.rootW })
+      return rows
+    }),
+    { name: '右边距（半齿）', w: dt.rightMargin },
+  ]
+
+  let cursor = 0
+  const ledgerRows = ledger.map((row) => {
+    const start = cursor
+    const end = cursor + row.w
+    cursor = end
+    return { ...row, start, end }
+  })
+
   return (
     <div className="tooth-table-wrap">
       <h2>齿宽分配表</h2>
@@ -144,23 +172,74 @@ function ToothTable({ dt }: { dt: NonNullable<ReturnType<typeof computeJoint>['d
         <thead>
           <tr>
             <th>齿号</th>
+            <th>齿顶起点</th>
             <th>齿顶宽</th>
             <th>齿根宽</th>
-            <th>距左端</th>
+            <th>齿距＝齿顶＋齿根</th>
+            <th>齿顶终点</th>
           </tr>
         </thead>
         <tbody>
           {dt.teeth.map((t) => (
-            <tr key={t.index}>
+            <tr key={t.index} data-testid={`tooth-row-${t.index}`}>
               <td>{t.index}</td>
-              <td>{fmt01(t.topW)}</td>
-              <td>{fmt01(t.rootW)}</td>
-              <td>{fmt01(t.faceX)}</td>
+              <td>{fmtClosure(t.faceX)}</td>
+              <td>{fmtClosure(t.topW)}</td>
+              <td>{fmtClosure(t.rootW)}</td>
+              <td>{fmtClosure(t.pitchW)}</td>
+              <td>{fmtClosure(t.faceXEnd)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>合计</td>
+            <td>—</td>
+            <td data-testid="sum-top">{fmtClosure(sumTop)}</td>
+            <td data-testid="sum-root">{fmtClosure(sumRoot)}</td>
+            <td data-testid="sum-pitch">{fmtClosure(sumPitch)}</td>
+            <td>—</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <h3>从左端逐段累加</h3>
+      <table className="tooth-table closure-ledger" data-testid="closure-ledger">
+        <thead>
+          <tr>
+            <th>段名</th>
+            <th>段宽</th>
+            <th>本段起点</th>
+            <th>本段终点</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ledgerRows.map((row, i) => (
+            <tr key={i}>
+              <td>{row.name}</td>
+              <td>{fmtClosure(row.w)}</td>
+              <td>{fmtClosure(row.start)}</td>
+              <td>{fmtClosure(row.end)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="note">闭合误差 {dt.closureError.toFixed(3)}mm；半齿边距 {fmt01(dt.margin)}mm（左右对称）</p>
+
+      <p className="note" data-testid="closure-check">
+        左边距 {fmtClosure(dt.leftMargin)}mm ＝ 右边距 {fmtClosure(dt.rightMargin)}mm
+        （各为端齿齿根 {fmtClosure(dt.teeth[0].rootW)}mm 的一半）
+      </p>
+      <p className="note">
+        逐齿核对：每一行「齿顶宽 ＋ 齿根宽 ＝ 齿距」；Σ齿距 = {fmtClosure(sumPitch)}mm ＝ 板宽 {fmtClosure(width)}mm。
+      </p>
+      <p className="note">
+        注意：末齿行的齿根宽不是末齿右侧再另加的一段，它等于左右两个半齿边距之和；所以顺序累加表的最后一段只加右边距。
+      </p>
+      <p className="note">
+        顺序核对：左边距 {fmtClosure(dt.leftMargin)} ＋ Σ齿顶 {fmtClosure(sumTop)} ＋ 前 n−1 个齿根槽 {fmtClosure(slotRoot)}
+        ＋ 右边距 {fmtClosure(dt.rightMargin)} ＝ {fmtClosure(dt.leftMargin + sumTop + slotRoot + dt.rightMargin)}mm；
+        板宽 {fmtClosure(width)}mm，闭合误差 {dt.closureError.toFixed(3)}mm。
+      </p>
     </div>
   )
 }
