@@ -68,13 +68,13 @@ interface ViewModel { id: 'front'|'top'|'side'; title: string; contentW: number;
 ## 8. 关键算法（或关键实现点）
 - **累积取整差分（燕尾齿宽分配，`src/lib/dovetail.ts:81-104`）**：先整体换算到 0.1mm 网格，再逐齿取相邻差分，保证总和严格闭合。
   ```text
-  totalUnits = round(板宽 / 0.1);  per = totalUnits / 齿数
-  pair[i]    = round(per × (i+1)) − round(per × i)      # Σpair === totalUnits
+  totalUnits = round(板宽 / 0.1);
+  pair[i]    = round(totalUnits × (i+1) / n) − round(totalUnits × i / n)  # Σpair === totalUnits
   d          = round(2 × 斜移量 / 0.1);  斜移量 = 齿深 / 角度比 r
-  topUnits[i] = round((pair[i] + d) / 2);  rootUnits[i] = pair[i] − topUnits[i]
-  边距 = 末齿齿根宽 / 2；齿间槽宽 = 该齿齿根宽
+  topUnits[i] = round((pair[i] + d) / 2);  rootUnits[i] = pair[i] − topUnits[i]  # 顶+根 === pair，逐格相等
+  边距 = 末齿齿根宽 / 2（左右同一值，奇数格时为 x.x5）；齿间槽宽 = 对应齿根宽
   ```
-  逐齿偏差 ≤ 1 格（0.1mm），闭合误差 `closureError` 每轮实测（编辑器页脚显示到小数点后 3 位）。
+  布局 `左边距｜齿顶1｜齿根1(槽1)｜…｜齿顶n｜右边距`：前 n−1 个齿根是齿间槽，末齿齿根拆成两个边距，故 Σ齿顶 + Σ齿根 = 板宽、末齿齿右端 + 右边距 = 板宽。逐齿偏差 ≤ 1 格（0.1mm），闭合误差 `closureError` 每轮实测（编辑器齿宽表明示，显示到小数点后 3 位）。
 - **齿数建议（`dovetail.ts:56`）**：目标齿距约 28mm，`clamp(round(板宽/28), 2, 12)`，然后在不超过 2 齿的前提下递减，直到齿根宽 ≥ 最小安全值。
 - **不静默放行**：齿根 < `MIN_ROOT`（软木 6mm / 硬木 4mm，`dovetail.ts:12`）、齿顶 < 2×kerf（锯片切不出来）、板宽 ≥ 150 而齿数 < 3、齿距 < 15mm、齿数为负值或超出 2~12，都写入 `warnings` 并在编辑器 `role="alert"` 区域展示。
 - **直榫经验公式（`src/lib/tenon.ts:42-53`）**：

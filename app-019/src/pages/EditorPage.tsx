@@ -5,7 +5,7 @@ import { KIND_LABEL } from '../types'
 import { computeJoint } from '../lib/calc'
 import { buildViews } from '../geometry/views'
 import { buildCutList } from '../lib/cutlist'
-import { fmt01 } from '../lib/format'
+import { fmtMark } from '../lib/format'
 import { getPlan, upsertPlan, downloadJSON, deletePlan } from '../store/plans'
 import { navigate } from '../router'
 import { ViewSvg, CheckRuler } from '../components/ViewSvg'
@@ -113,7 +113,7 @@ export function EditorPage({ id }: { id: string }) {
           </div>
           <p className="note" data-testid="recalc-ms">重算耗时 {recalcMs.current.toFixed(1)}ms（要求 &lt;100ms）</p>
           {computed && joint.kind.startsWith('dovetail') && computed.result.dovetail && (
-            <ToothTable dt={computed.result.dovetail} />
+            <ToothTable dt={computed.result.dovetail} width={joint.params.boardA.width} />
           )}
         </main>
 
@@ -136,7 +136,11 @@ export function EditorPage({ id }: { id: string }) {
   )
 }
 
-function ToothTable({ dt }: { dt: NonNullable<ReturnType<typeof computeJoint>['dovetail']> }) {
+function ToothTable({ dt, width }: { dt: NonNullable<ReturnType<typeof computeJoint>['dovetail']>; width: number }) {
+  const totalPitch = dt.teeth.reduce((s, t) => s + t.topW + t.rootW, 0)
+  const totalRoot = dt.teeth.reduce((s, t) => s + t.rootW, 0)
+  const runEnd = dt.teeth[dt.teeth.length - 1].faceX + dt.teeth[dt.teeth.length - 1].topW
+  const lastRoot = dt.teeth[dt.teeth.length - 1].rootW
   return (
     <div className="tooth-table-wrap">
       <h2>齿宽分配表</h2>
@@ -146,6 +150,7 @@ function ToothTable({ dt }: { dt: NonNullable<ReturnType<typeof computeJoint>['d
             <th>齿号</th>
             <th>齿顶宽</th>
             <th>齿根宽</th>
+            <th>齿距＝齿顶＋齿根</th>
             <th>距左端</th>
           </tr>
         </thead>
@@ -153,14 +158,34 @@ function ToothTable({ dt }: { dt: NonNullable<ReturnType<typeof computeJoint>['d
           {dt.teeth.map((t) => (
             <tr key={t.index}>
               <td>{t.index}</td>
-              <td>{fmt01(t.topW)}</td>
-              <td>{fmt01(t.rootW)}</td>
-              <td>{fmt01(t.faceX)}</td>
+              <td>{fmtMark(t.topW)}</td>
+              <td>{fmtMark(t.rootW)}</td>
+              <td data-testid={`pitch-cell-${t.index}`}>{fmtMark(t.topW + t.rootW)}</td>
+              <td>{fmtMark(t.faceX)}</td>
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr>
+            <th>合计</th>
+            <th>{fmtMark(dt.teeth.reduce((s, t) => s + t.topW, 0))}</th>
+            <th>{fmtMark(totalRoot)}</th>
+            <th data-testid="total-pitch">{fmtMark(totalPitch)}</th>
+            <td></td>
+          </tr>
+        </tfoot>
       </table>
-      <p className="note">闭合误差 {dt.closureError.toFixed(3)}mm；半齿边距 {fmt01(dt.margin)}mm（左右对称）</p>
+      <p className="note" data-testid="closure-line">
+        闭合：Σ齿顶 {fmtMark(dt.teeth.reduce((s, t) => s + t.topW, 0))}
+        ＋ Σ齿根 {fmtMark(totalRoot)} ＝ Σ齿距 {fmtMark(totalPitch)}mm；
+        其中前 {dt.teeth.length - 1} 个齿根是齿间槽，末齿齿根 {fmtMark(lastRoot)}mm 拆成左右边距各 {fmtMark(dt.margin)}mm，
+        故 Σ齿距即板宽 {fmtMark(width)}mm；闭合误差 {dt.closureError.toFixed(3)}mm
+      </p>
+      <p className="note">
+        左右边距相等，各 {fmtMark(dt.margin)}mm（＝末齿齿根 {fmtMark(lastRoot)}mm 的一半）；
+        末齿齿右端 {fmtMark(runEnd)} ＋ 右边距 {fmtMark(dt.margin)} ＝ {fmtMark(runEnd + dt.margin)}mm（＝板宽）。
+        “距左端”从左板边起算，逐齿累加齿距即得下一齿坐标。
+      </p>
     </div>
   )
 }

@@ -19,6 +19,12 @@ export function fmt01(x: number): string {
   return round01(x).toFixed(1)
 }
 
+/** 齿宽表文本：0.05mm 精度（边距/距左端可为 0.1mm 网格的半格），去掉多余的 0 */
+export function fmtMark(x: number): string {
+  const v = Math.round(x * 20) / 20
+  return Number(v.toFixed(2)).toString()
+}
+
 /** 坐标取整到 0.1 网格，消除浮点误差 */
 export function snap01(x: number): number {
   return Math.round(x * 10) / 10

@@ -1,7 +1,8 @@
 // 燕尾榫齿宽分配算法（带约束的分配问题，纯函数）
 // 设计约定（蓝图 §8）：
-//  - 在齿板正面（展示面）划线：边距(半齿) + 齿1 + 槽 + 齿2 + ... + 齿n + 边距
-//  - 均衡布局：槽宽 = 齿根宽、边距 = 半个齿根宽 → Σ(齿顶宽) + Σ(齿根宽) = 板宽（严格闭合）
+//  - 在齿板正面（展示面）划线：边距(半齿) + 齿顶1 + 槽(=齿根1) + 齿顶2 + ... + 齿顶n + 边距
+//  - 均衡布局：齿间槽宽 = 对应齿根宽、两边距之和 = 末齿齿根宽 → Σ齿顶 + Σ齿根 = 板宽（严格闭合）
+//  - 第 i 齿齿距 pitch[i] = 齿顶宽[i] + 齿根宽[i]（严格相等，逐齿可核）
 //  - 齿顶宽（展示面）= 齿根宽 + 2 × 斜移量；斜移量 = 齿深 / 角度比 r（1:r）
 import type { Wood } from '../types'
 import { round01 } from './format'
@@ -42,12 +43,13 @@ export interface PinCell {
 export interface DovetailResult {
   teeth: ToothCell[]
   pins: PinCell[]
-  margin: number      // 首尾半齿边距（左右对称）
+  margin: number      // 首尾半齿边距（左右对称，= 末齿齿根宽 / 2；末齿齿根为奇数格时含 0.05）
   slopeOffset: number // 单边斜移量 = 齿深 / r
   depth: number       // 齿深（穿透=板厚，半隐=0.75×板厚）
-  pitch: number       // 齿距 ≈ W/n
+  pitch: number       // 名义齿距 W/n（警告判定用；每齿实际齿距见 teeth[i].topW + rootW）
   warnings: string[]
-  closureError: number // |Σ齿顶 + Σ齿根 − 板宽|
+  closureError: number // 实测闭合误差 |Σ齿距 − 板宽|（即 |Σ齿顶 + Σ齿根 − 板宽|）
+  gridWidth: number    // 分配所用板宽（0.1mm 网格值，与输入宽相差 ≤0.05）
   minRootW: number
   minTopW: number
 }
@@ -70,29 +72,43 @@ export function suggestTeeth(
 export function computeDovetail(input: DovetailInput): DovetailResult {
   const { width, thickness, ratio, kerf, wood, blind } = input
   const warnings: string[] = []
-  const depth = round01(thickness * (blind ? (input.blindDepthRatio ?? 0.75) : 0.9))
+  const depth = round01(thickness * (blind ? (input.blindDepthRatio ?? 0.75) : 1))
   const slopeOffset = depth / ratio
   const n = input.teeth ?? suggestTeeth(width, thickness, ratio, wood, blind)
   const minRootW = MIN_ROOT[wood]
   const minTopW = round01(2 * kerf)
 
-  // —— 0.1mm 网格上的等分 + 余量处理 ——
-  // 总网格数分配到 n 个齿（齿顶+齿根 成对），累积取整差分保证 Σpair 严格等于总宽
-  const per = Math.round(width / U / n)
-  const pairs = new Array<number>(n).fill(per)
+  // —— 0.1mm 网格上的严格闭合分配 ——
+  // 1) 板宽量化到 0.1mm 网格（输入任意小数 → 网格宽，相差 ≤0.05）
+  // 2) 累积取整差分把总网格分给 n 个齿距：
+  //      pitch[i] = round(W(i+1)/n) − round(Wi/n)  →  Σpitch 严格 = 总网格，逐齿偏差 ≤1 格
+  // 3) 齿顶/齿根在同一齿距内互补分配：top = round((pitch + d)/2)，root = pitch − top
+  //      → 每齿 top + root = pitch（严格相等），top − root 与 2×斜移量相差 ≤1 格
+  // 4) 边距 = 末齿齿根宽 / 2（左右同值）；末齿齿根拆成两边距，故 Σ齿顶 + Σ齿根 = 网格宽
+  const totalUnits = Math.round(width / U)
+  const pairUnits = Array.from({ length: n }, (_unused, i) =>
+    Math.round((totalUnits * (i + 1)) / n) - Math.round((totalUnits * i) / n),
+  )
   const d = Math.round((2 * slopeOffset) / U)
-  const topUnits = pairs.map((p) => Math.round((p + d) / 2))
-  const rootUnits = pairs.map((p) => p - Math.round(p / 2))
-  const margin = (rootUnits[0] / 2) * U
+  const topUnits = pairUnits.map((p) => Math.round((p + d) / 2))
+  const rootUnits = pairUnits.map((p, i) => p - topUnits[i])
+  const margin = (rootUnits[n - 1] * U) / 2
+  const gridWidth = totalUnits * U
   const teeth: ToothCell[] = []
   let x = margin
   for (let i = 0; i < n; i++) {
     const topW = topUnits[i] * U
     const rootW = rootUnits[i] * U
+    // 坐标保留 0.05mm 精度（边距可为半格），全部由网格整数累加，不逐点取整以免累积漂移
     teeth.push({ index: i + 1, topW, rootW, faceX: x, backX: x + slopeOffset })
     x += topW + rootW
   }
-  const closureError = Math.abs(per * n * U - width)
+  // 实测闭合误差：|Σ齿距 − 板宽|。
+  // 布局为 左边距｜齿顶1｜齿根1(=槽1)｜…｜齿顶n｜右边距，且 2×边距 = 末齿齿根，
+  // 故 Σ齿距 = Σ齿顶 + Σ齿根 = Σ齿顶 + Σ齿间槽 + 2×边距 = 网格宽（网格宽上恒为 0）。
+  const closureError = Math.abs(
+    round01(teeth.reduce((s, th) => s + round01(th.topW + th.rootW), 0) - width),
+  )
 
   // —— 销板（B 板）互补齿形 ——
   const pins: PinCell[] = []
@@ -162,6 +178,7 @@ export function computeDovetail(input: DovetailInput): DovetailResult {
     pitch,
     warnings,
     closureError,
+    gridWidth,
     minRootW,
     minTopW,
   }

@@ -27,6 +27,48 @@ describe('燕尾齿宽分配（蓝图 §8 约束）', () => {
     }
   })
 
+  it('均分情形：每齿顶+根严格等于齿距，闭合误差为 0（W=200,n=7 曾出现末齿冲出板边）', () => {
+    // 200/7 在 0.1mm 网格上不可分：累积差分把 1~2 格余量摊给前两齿，
+    // 旧实现 per*n=200.2 却只拿 per*n 与板宽比，报告 0 误差而实际末齿越界
+    const r = computeDovetail({ width: 200, thickness: 18, ratio: 8, teeth: 7, kerf: 1.1, wood: 'hardwood' })
+    const expectedPairs = [286, 285, 286, 286, 286, 285, 286]
+    r.teeth.forEach((t, i) => {
+      expect(Math.round((t.topW + t.rootW) * 10)).toBe(expectedPairs[i])
+    })
+    const sum = r.teeth.reduce((s, t) => s + t.topW + t.rootW, 0)
+    expect(sum).toBeCloseTo(200, 9)
+    expect(r.closureError).toBeCloseTo(0, 9)
+    const last = r.teeth[6]
+    expect(last.faceX + last.topW + r.margin).toBeCloseTo(200, 9)
+    // 左右边距相同
+    expect(last.faceX + last.topW).toBeCloseTo(200 - r.margin, 9)
+    expect(r.teeth[0].faceX).toBeCloseTo(r.margin, 9)
+    // 边距取末齿齿根之半（旧实现错取首齿 → 不对称）
+    expect(r.margin).toBeCloseTo(last.rootW / 2, 9)
+  })
+
+  it('边距可为半格 0.05mm：左右仍相等，末齿不冲板边（W=103,n=2,厚20.5,r=6）', () => {
+    const r = computeDovetail({ width: 103, thickness: 20.5, ratio: 6, teeth: 2, kerf: 1.1, wood: 'hardwood' })
+    // pitch 单元 515/515；d=round(2×20.5/6 /0.1)=68 → top=292（29.2mm），root=223（22.3mm，奇数）
+    expect(r.margin).toBeCloseTo(11.15, 9)
+    expect(r.margin * 2).toBeCloseTo(r.teeth[1].rootW, 9)
+    const last = r.teeth[1]
+    expect(last.faceX + last.topW + r.margin).toBeCloseTo(103, 9)
+    expect(r.teeth[0].faceX).toBeCloseTo(r.margin, 9)
+    const sum = r.teeth.reduce((s, t) => s + t.topW + t.rootW, 0)
+    expect(sum).toBeCloseTo(103, 9)
+    // 距左端序列可逐齿复算
+    expect(last.faceX).toBeCloseTo(r.teeth[0].faceX + r.teeth[0].topW + r.teeth[0].rootW, 9)
+  })
+
+  it('非 0.1mm 网格板宽（199.96）：闭合误差 ≤0.05 且左右边距仍相等', () => {
+    const r = computeDovetail({ width: 199.96, thickness: 18, ratio: 8, teeth: 5, kerf: 1.1, wood: 'hardwood' })
+    expect(r.closureError).toBeLessThanOrEqual(0.05 + 1e-9)
+    const last = r.teeth[r.teeth.length - 1]
+    expect(last.faceX + last.topW + r.margin).toBeCloseTo(r.gridWidth, 9)
+    expect(r.margin * 2).toBeCloseTo(last.rootW, 9)
+  })
+
   it('随机 200 组：严格闭合 ≤0.1mm，低于最小值必须给出警告（不静默）', () => {
     const rand = mulberry32(20260916)
     let belowMinCount = 0
@@ -48,10 +90,25 @@ describe('燕尾齿宽分配（蓝图 §8 约束）', () => {
         expect(Number.isFinite(t.rootW)).toBe(true)
         expect(Number.isFinite(t.faceX)).toBe(true)
       }
-      // 3) 首齿从边距开始，末齿 + 边距 = 板宽
+      // 3) 首齿从边距开始，末齿 + 右边距 = 板宽
       expect(r.teeth[0].faceX).toBeCloseTo(r.margin, 6)
       const last = r.teeth[r.teeth.length - 1]
       expect(last.faceX + last.topW + r.margin).toBeCloseTo(width, 6)
+      // 3a) 每齿：齿顶 + 齿根 = 该齿齿距（0.05mm 网格上逐格相等，不靠 toBeCloseTo 抹误差）
+      for (const t of r.teeth) {
+        expect(Math.round((t.topW + t.rootW) * 20)).toBe(Math.round(t.topW * 20) + Math.round(t.rootW * 20))
+      }
+      for (let i = 1; i < r.teeth.length; i++) {
+        const prev = r.teeth[i - 1]
+        const cur = r.teeth[i]
+        expect(cur.faceX).toBeCloseTo(prev.faceX + prev.topW + prev.rootW, 6)
+      }
+      // 3b) 左右边距同一值，且 = 末齿齿根的一半（不是首齿）
+      expect(r.margin * 2).toBeCloseTo(last.rootW, 6)
+      // 3c) Σ齿顶 + Σ齿根 = 板宽（闭合误差 ≤ 0.1）
+      const sumAll = r.teeth.reduce((s, t) => s + t.topW + t.rootW, 0)
+      expect(Math.abs(sumAll - width)).toBeLessThanOrEqual(0.1)
+      expect(r.closureError).toBeCloseTo(Math.abs(sumAll - width), 10)
       // 4) 低于最小安全值 / 锯路限制 → 必须有警告
       const minRoot = Math.min(...r.teeth.map((t) => t.rootW))
       const minTop = Math.min(...r.teeth.map((t) => t.topW))

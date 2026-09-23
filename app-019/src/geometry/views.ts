@@ -132,10 +132,12 @@ function dovetailViews(kind: JointKind, p: Joint['params'], dt: DovetailResult):
     top.marks.push({ x: th.faceX + th.topW / 2, y: LJ - 6, text: String(th.index) })
   }
   hdim(top, 0, W, LJ + 12, `板宽 ${fmtDrawing(W)}`)
-  hdim(top, 0, dt.margin, -10, `边距 ${fmtDrawing(dt.margin)}`)
+  hdim(top, 0, dt.margin, -10, `左边距 ${fmtDrawing(dt.margin)}`)
   if (dt.teeth.length >= 2) {
-    hdim(top, dt.teeth[0].faceX, dt.teeth[1].faceX, -20, `齿距 ${fmtDrawing(dt.pitch)}`)
+    const pitch0 = dt.teeth[1].faceX - dt.teeth[0].faceX
+    hdim(top, dt.teeth[0].faceX, dt.teeth[1].faceX, -20, `齿距 ${fmtDrawing(pitch0)}`)
   }
+  hdim(top, W - dt.margin, W, -10, `右边距 ${fmtDrawing(dt.margin)}`)
   top.texts.push({ x: 0, y: LJ + 24, text: '↑ 拼接端；按虚线（锯切线）下锯', anchor: 'start', cls: 'note' })
 
   // 侧视图：销板端面（W_B × t_B），燕尾互补齿

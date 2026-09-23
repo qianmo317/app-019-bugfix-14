@@ -91,6 +91,35 @@ describe('编辑器：参数改动即时重算 + 脏状态提示 + 齿宽表', (
     expect(screen.queryByTestId('tooth-table')).toBeNull()
   })
 
+  it('齿宽表：逐齿齿距列 + 合计 + 闭合行可核对，左右边距同值', () => {
+    const { id } = savedPlan()
+    render(<EditorPage id={id} />)
+    const table = screen.getByTestId('tooth-table')
+    // 表头含齿距列
+    expect(table).toHaveTextContent('齿距＝齿顶＋齿根')
+    // 合计行 Σ齿距 = 板宽 200
+    expect(screen.getByTestId('total-pitch').textContent).toBe('200')
+    // 每个齿距单元格 = 同行齿顶 + 齿根
+    const rows = table.querySelectorAll('tbody tr')
+    expect(rows.length).toBe(7)
+    rows.forEach((row) => {
+      const cells = row.querySelectorAll('td')
+      const top = Number(cells[1].textContent)
+      const root = Number(cells[2].textContent)
+      const pitch = Number(cells[3].textContent)
+      expect(Math.round((top + root) * 100) / 100).toBe(pitch)
+    })
+    const closure = screen.getByTestId('closure-line').textContent ?? ''
+    expect(closure).toContain('Σ齿距 200')
+    expect(closure).toContain('板宽 200')
+    expect(closure).toContain('闭合误差 0.000mm')
+    // 左右边距同一值（默认 200/7/8 配置：末齿根 12 → 边距 6）
+    expect(closure).not.toContain('左边距 0')
+    const note = table.parentElement?.textContent ?? ''
+    expect(note).toContain('左右边距相等，各 6mm')
+    expect(note).toContain('194 ＋ 右边距 6 ＝ 200')
+  })
+
   it('方案不存在 → 显示错误并可控', () => {
     render(<EditorPage id="nonexistent" />)
     expect(screen.getByText('方案不存在或已删除')).toBeInTheDocument()
